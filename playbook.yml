@@ -1,0 +1,108 @@
+---
+- name: Setup Prometheus on Amazon Linux
+  hosts: prometheus
+  become: yes
+
+  tasks:
+    - name: Update YUM package repository
+      yum:
+        name: '*'
+        state: latest
+
+    - name: Install required packages
+      yum:
+        name:
+          - wget
+          - tar
+        state: present
+
+    - name: Download Prometheus
+      get_url:
+        url: https://github.com/prometheus/prometheus/releases/download/v2.41.0/prometheus-2.41.0.linux-amd64.tar.gz
+        dest: /tmp/prometheus-2.41.0.linux-amd64.tar.gz
+
+    - name: Extract Prometheus
+      unarchive:
+        src: /tmp/prometheus-2.41.0.linux-amd64.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Move Prometheus binaries
+      command: mv /tmp/prometheus-2.41.0.linux-amd64/prometheus /usr/local/bin/prometheus
+
+    - name: Move Prometheus tool
+      command: mv /tmp/prometheus-2.41.0.linux-amd64/promtool /usr/local/bin/promtool
+
+    - name: Set permissions for Prometheus binaries
+      file:
+        path: /usr/local/bin/prometheus
+        mode: '0755'
+
+    - name: Set permissions for Prometheus tool
+      file:
+        path: /usr/local/bin/promtool
+        mode: '0755'
+
+    - name: Create Prometheus configuration directory
+      file:
+        path: /etc/prometheus
+        state: directory
+
+    - name: Create Prometheus configuration file
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              scrape_interval: 5s
+              static_configs:
+                - targets: ['localhost:9090']
+
+    - name: Create Prometheus systemd service
+      copy:
+        dest: /etc/systemd/system/prometheus.service
+        content: |
+          [Unit]
+          Description=Prometheus
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=prometheus
+          ExecStart=/usr/local/bin/prometheus \
+            --config.file /etc/prometheus/prometheus.yml \
+            --storage.tsdb.path /var/lib/prometheus/ \
+            --web.console.templates=/usr/share/prometheus/consoles \
+            --web.console.libraries=/usr/share/prometheus/console_libraries
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Create Prometheus user
+      user:
+        name: prometheus
+        shell: /bin/false
+
+    - name: Create Prometheus data directory
+      file:
+        path: /var/lib/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable Prometheus service
+      systemd:
+        name: prometheus
+        enabled: yes
+
+    - name: Start Prometheus service
+      systemd:
+        name: prometheus
+        state: started
